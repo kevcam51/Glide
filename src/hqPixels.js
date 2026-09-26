@@ -350,7 +350,7 @@ const SEAT_X = {
   owner: [62],
   chief: [82],
   finance: [32, 59, 86],
-  ops: [46, 88],
+  ops: [34, 61, 88],
   marketing: [25, 55, 85],
   research: [53, 74, 94],
   front: [44, 65, 86, 107],

@@ -25,6 +25,8 @@ worker would read (and spend Kevin's plan on) every shift. This one is a page.
 | Front Desk Coordinator | Front Office | Gmail, Glidna | Weekdays 8:00 a.m. and 1:00 p.m. | routine `HQ · Front Desk` |
 | Progress Analyst | Coaching | Glidna | Tuesdays 7:00 a.m. | routine `HQ · Progress Analyst` |
 | Systems Watchdog | Operations & Tech | Glidna, and the Claude app's usage meter | Every evening, 9:00 p.m. | scheduled task on Kevin's Mac |
+| Finance Manager | Finance (head) | Intuit QuickBooks, Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
+| Web Designer | Operations & Tech | Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
 
 **Kevin's plan is Claude Pro**, which caps how many routines can start in a
 day (claude.ai/code/routines shows the number) and shares its usage with his

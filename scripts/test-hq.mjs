@@ -22,7 +22,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { stripComments } from "./lib/strip-comments.mjs";
 import {
-  ROOMS, SEATS, FLOORS, CREW_RULES, BLUEPRINT, ENGINES,
+  ROOMS, SEATS, FLOORS, CREW_RULES, BLUEPRINT, ENGINES, findAgents, agentBrief, reportsTo, stem, chatApps,
   seatsIn, headOf, orgCounts, roomSummary, roomsOnFloor, liveSeats,
 } from "../src/hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "../src/hqPixels.js";
@@ -153,11 +153,21 @@ console.log("org chart");
   ok(first.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst",
     "the first hires are the Bookkeeper, the Front Desk Coordinator and the Progress Analyst");
   ok(first.every((s) => s.waitingOn && s.engine === "claude"), "each first hire says what it's waiting on and runs on the Claude plan");
-  ok(training.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst,systems-watchdog",
-    "…and the Systems Watchdog joins them to watch the plan's usage");
+  ok(training.map((s) => s.id).sort().join() === "bookkeeper,finance-manager,front-desk,progress-analyst,systems-watchdog,web-designer",
+    "…joined by the Systems Watchdog, the Finance Manager and the Web Designer");
   const dog = training.find((s) => s.id === "systems-watchdog");
   ok(dog && dog.engine === "mac" && ENGINES.mac && dog.waitingOn, "…from the Claude app on the owner's Mac, the one place the usage meter can be read");
-  ok(training.every((s) => s.role === "worker"), "first hires are workers, not heads");
+  ok(first.every((s) => s.role === "worker"), "first hires are workers, not heads");
+  // Kevin: "I might need to discuss it with a finance officer ... Someone that
+  // can be the head of finance." and "Can we create a web designer?"
+  const fm = training.find((s) => s.id === "finance-manager");
+  ok(fm && fm.role === "head" && fm.room === "finance" && fm.engine === "chat" && ENGINES.chat,
+    "the Finance Manager heads Finance, and Kevin talks to it in a chat when he needs it");
+  ok(/pric/.test(fm.duties.join(" ")), "…and talking through prices is part of its job");
+  const wd = training.find((s) => s.id === "web-designer");
+  ok(wd && wd.room === "ops" && wd.engine === "chat" && /website/.test(wd.duties.join(" ")) && /Glidna/.test(wd.duties.join(" ")),
+    "the Web Designer sits in Operations & Tech and looks after the website and Glidna");
+  ok(/website/.test(ROOMS.find((r) => r.id === "ops").tagline), "…and the room's tagline says so");
   // Kevin: "let me know how to check mark for each one" — every hire names the
   // apps to leave on for it, and every one reaches the desk through Glidna.
   ok(training.every((s) => Array.isArray(s.apps) && s.apps.length && s.apps.some((a) => /^Glidna/.test(a))),
@@ -166,13 +176,14 @@ console.log("org chart");
   ok(/Gmail \(drafts only\)/.test(training.find((s) => s.id === "front-desk").apps.join()) &&
     !training.some((s) => s.id !== "front-desk" && s.apps.join().includes("Gmail")),
     "only the Front Desk gets Gmail, and only for drafts");
-  ok(!training.some((s) => s.id !== "bookkeeper" && s.apps.join().includes("QuickBooks")), "…only the Bookkeeper gets QuickBooks");
+  ok(training.filter((s) => s.apps.join().includes("QuickBooks")).every((s) => s.room === "finance" && /QuickBooks \(reports only\)/.test(s.apps.join())),
+    "…only Finance gets QuickBooks, and only its reports");
   ok(/After Finance and the Front Office are running/.test(SEATS.find((s) => s.id === "chief-of-staff").hireWhen || ""),
     "the Chief of Staff waits until there is a desk's worth of work to brief on");
 
   const c = orgCounts();
   ok(c.total === SEATS.length && c.you + c.training + c.open === c.total, "orgCounts adds up to every seat");
-  ok(roomSummary("finance") === "1 in training · 2 open", `Finance reads "1 in training · 2 open" (got "${roomSummary("finance")}")`);
+  ok(roomSummary("finance") === "2 in training · 1 open", `Finance reads "2 in training · 1 open" (got "${roomSummary("finance")}")`);
   ok(roomSummary("owner") === "You", `Your Office reads "You" (got "${roomSummary("owner")}")`);
 
   ok(FLOORS.every((f) => roomsOnFloor(f).length === 2), "every floor holds two rooms");
@@ -208,10 +219,10 @@ console.log("live seats");
   ok(liveSeats(SEATS, { active: [{ worker: "owner" }] }).find((s) => s.id === "owner").status === "you",
     "…and not even a clock-in can move the owner");
   const counts = orgCounts(moved);
-  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 1, `the counts follow (${JSON.stringify(counts)})`);
+  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 3, `the counts follow (${JSON.stringify(counts)})`);
   ok(roomSummary("front", moved) === "1 on shift · 3 open", `a room's line says who is on shift (${roomSummary("front", moved)})`);
-  ok(roomSummary("finance", moved) === "1 working · 2 open", `…and who is working (${roomSummary("finance", moved)})`);
-  ok(roomSummary("finance") === "1 in training · 2 open", "the chart's own line is unchanged without live data");
+  ok(roomSummary("finance", moved) === "1 working · 1 in training · 1 open", `…and who is working (${roomSummary("finance", moved)})`);
+  ok(roomSummary("finance") === "2 in training · 1 open", "the chart's own line is unchanged without live data");
 
   const hqCode = stripComments(HQ);
   // The screen wires it: live seats feed every count and the map, a poll
@@ -219,7 +230,7 @@ console.log("live seats");
   // the map and come back marked.
   ok(/const live = liveSeats\(SEATS, desk\);/.test(hqCode), "the HQ screen works from live seats");
   ok(/<HQStation seats=\{seats\}/.test(hqCode), "…and hands them to the map");
-  ok(/deliveries=\{toDeliver\} onDelivered=\{markDelivered\}\s*deskCount=\{Math\.max\(0, desk\.open\.length - toDeliver\.length\)\}/.test(hqCode),
+  ok(/deliveries=\{toDeliver\} onDelivered=\{markDelivered\}[^>]*deskCount=\{Math\.max\(0, desk\.open\.length - toDeliver\.length\)\}/.test(hqCode),
     "the map gets what to deliver, tells the screen when it's delivered, and puts on the owner's desk only what has been handed over");
   ok(/document\.visibilityState === "visible"\) load\(\{ quiet: true \}\)/.test(hqCode), "the minute poll runs only while the HQ is on screen, and quietly");
   ok(/const POLL_MS = 60000;/.test(hqCode), "…once a minute");
@@ -252,6 +263,85 @@ console.log("pixel art");
     "a room with nobody hired draws with the lights off");
   ok(inBounds(palmTree(), PALM_W, PALM_H), "the palm tree stays inside its canvas");
   ok(inBounds(van(), VAN_W, VAN_H), "the van stays inside its canvas");
+}
+
+// ── Profiles and the search (round 6) ────────────────────────────────────────
+// Kevin: "When I click on the specific agent can we make sure that it tells me
+// all of the jobs that they are responsible for? and we might need to create
+// some type of search where I can type a name, job type, etc ... it should take
+// me to that agents profile."
+console.log("profiles and the search");
+{
+  const hqCode = stripComments(HQ);
+  ok(SEATS.every((s) => Array.isArray(s.duties) && s.duties.length >= 3), "every seat lists everything it's responsible for (3 or more jobs)");
+  ok(SEATS.every((s) => s.duties.every((d) => /^[A-Z]/.test(d) && /[.]$/.test(d) && d.length <= 160)),
+    "…each one a short, plain sentence");
+  ok(SEATS.every((s) => Array.isArray(s.keywords) && s.keywords.length >= 3), "every seat has the other words people use for its work");
+  // Who handles what — the questions Kevin actually has, and the ones the crew exists for.
+  const cases = [
+    ["pricing", "finance-manager"], ["prices for my plans", "finance-manager"], ["finance officer", "finance-manager"],
+    ["head of finance", "finance-manager"], ["taxes", "finance-manager"],
+    ["website", "web-designer"], ["squarespace", "web-designer"], ["update the homepage", "web-designer"], ["web", "web-designer"],
+    ["quickbooks", "bookkeeper"], ["Bookkeeper", "bookkeeper"],
+    ["invoice", "billing-specialist"], ["failed card", "billing-specialist"], ["refund", "billing-specialist"],
+    ["email inquiries", "front-desk"], ["front desk", "front-desk"],
+    ["reschedule a session", "scheduling"], ["new client waiver", "onboarding"],
+    ["instagram post", "content-creator"], ["google reviews", "reviews-referrals"],
+    ["competitors", "market-researcher"], ["partner with a gym", "partnerships-scout"],
+    ["who is slipping", "progress-analyst"], ["check-in message", "check-in-coordinator"],
+    ["claude usage", "systems-watchdog"], ["upgrade my plan", "systems-watchdog"], ["glidna is down", "systems-watchdog"],
+    ["morning brief", "chief-of-staff"], ["kevin", "owner"],
+  ];
+  const wrong = cases.filter(([q, id]) => { const r = findAgents(q); return !r.length || r[0].seat.id !== id; })
+    .map(([q, id]) => `"${q}" → ${(findAgents(q)[0] || { seat: { id: "nobody" } }).seat.id}, not ${id}`);
+  ok(wrong.length === 0, `each question finds the right person first (${cases.length} asked)${wrong.length ? `: ${wrong.join("; ")}` : ""}`);
+  ok(findAgents("zebra").length === 0 && findAgents("   ").length === 0 && findAgents("the of and").length === 0,
+    "nonsense, blanks and filler words find nobody, rather than everybody");
+  ok(findAgents("pricing").length === 1, "…and only people who really fit come back, not everyone who mentions the word once");
+  const first = (q) => (findAgents(q)[0] || { seat: {} }).seat;
+  ok(first("instagram").status === "open", "an open seat can be found too, so a question gets an answer before the hire");
+  ok(first("websi").id === "web-designer" && first("quickb").id === "bookkeeper", "someone still typing gets there early");
+  ok(/^Keeps smoothtraining\.com/.test(findAgents("squarespace website")[0].why) || /website/i.test(findAgents("squarespace website")[0].why),
+    "each result says why: the job of theirs that fits the question");
+  ok(findAgents("x", SEATS, { limit: 99 }).length <= SEATS.length && findAgents("manager", SEATS, { limit: 2 }).length <= 2, "results are capped");
+  ok(["invoices", "invoice"].map(stem).every((w) => w === "invoic") && stem("pricing") === stem("prices") && stem("scheduling") === stem("schedule"),
+    "different forms of a word find the same person");
+
+  // Who reports to whom.
+  const by = (id) => SEATS.find((x) => x.id === id);
+  ok(reportsTo(by("bookkeeper")).id === "finance-manager" && reportsTo(by("web-designer")).id === "operations-manager",
+    "a worker reports to its department's head");
+  ok(reportsTo(by("finance-manager")).id === "chief-of-staff" && reportsTo(by("chief-of-staff")).id === "owner" && reportsTo(by("owner")) === null,
+    "…a head to the Chief of Staff, and the Chief of Staff to you");
+
+  // The brief that starts a chat with an agent.
+  const brief = agentBrief(by("finance-manager"));
+  ok(by("finance-manager").duties.every((d) => brief.includes(d)), "an agent's brief carries every one of its jobs");
+  ok(/never send, pay, publish, delete or change/.test(brief) && /1,200/.test(brief) && /No tax, legal, investment or medical advice/.test(brief),
+    "…and the crew's rules");
+  ok(/QuickBooks \(reports only\)/.test(brief) && /hq_clock_in \(worker: "finance-manager"\)/.test(brief) && /hq_file_report/.test(brief),
+    "…the apps it may use, and how the conversation reaches the HQ");
+  ok(!/hq_clock_in/.test(agentBrief(by("market-researcher"))), "…but an agent with no apps isn't told to use the HQ's tools");
+  ok(/the way the Operations Manager would/.test(agentBrief(by("web-designer"))) && !/the way the/.test(agentBrief(by("chief-of-staff"))),
+    "a worker checks its work the way its head would; the Chief of Staff answers to you alone");
+  ok(agentBrief(by("owner")) === "", "the owner has no brief: that's Kevin");
+  ok(JSON.stringify(chatApps(by("front-desk"))) === '["Gmail","Glidna"]' && JSON.stringify(chatApps(by("systems-watchdog"))) === '["Glidna"]'
+    && !/Your Claude app/.test(agentBrief(by("systems-watchdog"))),
+    "in a chat, only real connectors are named as switches: the Watchdog's usage meter isn't one");
+  ok(!/[$@]|\d{3}/.test(SEATS.map((x) => agentBrief(x)).join("\n").replace(/1,200/g, "")),
+    "no brief carries a price, an address, a phone number or any other business data");
+
+  // The screen: a search at the top, a profile for anyone, from anywhere.
+  ok(/<AgentSearch seats=\{seats\} onOpen=\{openAgent\} \/>/.test(hqCode), "the HQ opens with a search for the right agent");
+  ok(/placeholder="A name, a job or a problem/.test(hqCode) && /font-size: 16px/.test(hqCode.slice(hqCode.indexOf(".hq-search-input"))),
+    "…that says what it takes, at a size an iPhone won't zoom into");
+  ok(/agentSeat && \(\s*<AgentSheet /.test(hqCode) && /function AgentSheet\(/.test(hqCode), "a profile opens over the HQ for whoever is picked");
+  ok(/className="hq-seat-title hq-seat-open" onClick=\{\(\) => onOpen\(s\.id\)\}/.test(hqCode), "tapping a person in a department opens their profile");
+  ok((hqCode.match(/className="hq-org-person" onClick=\{\(\) => openAgent\(/g) || []).length === 2, "…so does tapping a head or a worker on the org chart");
+  ok(/onAgent=\{openAgent\}/.test(hqCode), "…and tapping a person on the map");
+  ok(/if \(agentIdRef\.current\) \{ closeAgentRef\.current\(\); return; \}/.test(hqCode), "Escape closes a profile before anything else");
+  ok(/Responsible for/.test(hqCode) && /\{duties\.map\(\(d\) => <li key=\{d\}>\{d\}<\/li>\)\}/.test(hqCode), "the profile lists every job");
+  ok(/not Claude Code/.test(hqCode) && /Copy their brief/.test(hqCode), "…and says where to talk to them: a regular chat, not Claude Code");
 }
 
 console.log(`\n${checks - fails}/${checks} HQ checks passed`);

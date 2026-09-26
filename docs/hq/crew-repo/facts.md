@@ -11,33 +11,24 @@ guesses.
   (Smooth Training LLC). Owner and head coach: Kevin Cameron, an ISSA
   Certified Personal Trainer.
 - Training comes to the client: at their home, in their building's gym, or
-  outside. Sessions can also be remote.
+  outside. [Kevin: online or remote coaching — offered?]
 - Clients follow their plan in the Trainerize app and track nutrition in
   Glidna (glidna.com), Smooth Training's own app.
 
 ## What we offer
 
-Three monthly plans, as published on smoothtraining.com:
+⚠️ **The prices on smoothtraining.com are out of date** (Kevin, September
+2026). Never quote the website's plans or prices — not the $400, $800 or
+$1,200 tiers, nor anything else on it about price.
 
-- **Tier 1 — $400 a month:** a personal training session with a trainer once
-  a week (in person or remote), an easy-to-follow meal guide, text and email
-  check-ins, a weekly Monday–Friday workout routine, and a free monthly
-  progress call of 15–30 minutes.
-- **Tier 2 — $800 a month:** personal training twice a week (in person or
-  remote), personalized workout videos for 3–5 days a week, daily check-ins,
-  guided nutrition Monday–Friday, and a free monthly 40-minute progress call.
-- **Tier 3 — $1,200 a month:** personal training three times a week,
-  personalized solo workout videos for 3–5 days a week, priority daily
-  check-ins, guided nutrition every day, grocery-shopping and eating-out
-  guides, and a free monthly 60-minute progress call.
+- Plans and prices: [Kevin: current plans and prices]
 - **First step: a free consultation.** [Kevin: how long it is]
 - Session length: [Kevin: how long one training session is]
 - Partner (two-person) sessions: [Kevin: offered? price?]
 
 ## Where and when
 
-- Service area: all over South Florida (the website's words). [Kevin: the
-  area you actually cover]
+- Service area: [Kevin: the area you cover]
 - Days and hours: [Kevin: when sessions can be booked]
 - How to start: email kevin@smoothtraining.com or call or text
   (954) 798-1198 to set up the free consultation. Kevin books it and a
@@ -70,8 +61,8 @@ Three monthly plans, as published on smoothtraining.com:
 
 ## Where these facts came from
 
-The plans and prices, the service area and how to start: smoothtraining.com
-(the tier, contact and schedule pages), read September 25, 2026. The free
-consultation, the card on file and the waiver: Smooth Training's own booking,
-Stripe and waiver emails. The signature: Kevin's sent mail. Anything else is
-a placeholder until Kevin fills it in.
+How to start (email or phone): smoothtraining.com's contact page and Kevin's
+own signature. The free consultation, the card on file and the waiver: Smooth
+Training's own booking, Stripe and waiver emails. The signature: Kevin's sent
+mail. The website is otherwise out of date, so nothing else comes from it;
+everything marked `[Kevin: …]` waits for Kevin.

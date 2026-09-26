@@ -85,7 +85,7 @@ export const SEAT_SPOTS = {
   chief: [[164, 38]],
   finance: [[246, 38], [268, 38], [290, 38]],
   coaching: [[54, 126], [72, 126], [90, 126]],
-  ops: [[252, 126], [274, 126]],
+  ops: [[246, 126], [268, 126], [290, 126]],
   marketing: [[32, 190], [52, 190], [72, 190]],
   research: [[144, 190], [164, 190], [184, 190]],
   front: [[240, 188], [258, 188], [276, 188], [294, 188]],
@@ -230,8 +230,10 @@ export function spotIn(roomId, rng) {
 // a worker on shift (who mostly stays at the desk). An open seat never walks.
 const HIRED = new Set(["training", "working", "on-shift"]);
 
-// Where the owner stands a visitor: in front of his desk, facing him.
-export const OWNER_DROP = [56, 49];
+// Where the owner stands a visitor: in front of his desk, facing him. Far
+// enough in front that the visitor's name tag sits clear under his "You"
+// (tags are up to ~10.4 map units tall on a phone), so neither has to move.
+export const OWNER_DROP = [56, 51];
 
 // Where someone stands to take their seat. At a north-facing desk the seated
 // figure is drawn three units nearer the camera than the seat is measured
@@ -657,6 +659,30 @@ export function tagBox(x, feetY, tw, th) {
 export const boxesMeet = (a, b, pad = 0) =>
   a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
 
+// Who is under a tap on the map (Kevin: "when I click on the specific agent"):
+// the person whose body or name tag is under the point, give or take a
+// fingertip, and the nearest one when two overlap. Someone seated counts at
+// their chair. `extra` adds people who never walk, like the owner at his desk;
+// `tags` are the name tags' measured sizes, when the page knows them.
+export const TAP_SLOP = 3;
+export function personAt(px, py, walkers, { extra = [], tags = null } = {}) {
+  const tap = { x: px, y: py, w: 0, h: 0 };
+  let best = null, bestD = Infinity;
+  const consider = (id, x, feetY) => {
+    const t = tags && tags[id];
+    const boxes = [personBox(x, feetY), ...(t ? [tagBox(x, feetY, t[0], t[1])] : [])];
+    if (!boxes.some((b) => boxesMeet(b, tap, TAP_SLOP))) return;
+    const d = Math.hypot(px - x, py - (feetY - PERSON_H / 2));
+    if (d < bestD) { bestD = d; best = id; }
+  };
+  for (const w of walkers) {
+    const [x, y] = w.mode === "sit" ? seatStand(w.home, w.seat) : [w.x, w.y];
+    consider(w.id, x, y);
+  }
+  for (const e of extra) consider(e.id, e.x, e.y);
+  return best;
+}
+
 // The places a room's name (w × h map units) can hang, its usual one first.
 export function labelSlots(roomId, w, h) {
   const r = ROOM_RECTS[roomId];
@@ -708,6 +734,52 @@ export function crowdBoxes(items, crew, { now = null, lookahead = LABEL_LOOKAHEA
 // Which people's name tags are passing under a room's name right now: those
 // fade until they're clear. `people` is [{ id, x, feet }], `tagSize(id)` their
 // tag's size in map units, `labels` the boxes the names hang in.
+// Name tags never print one over another. Two people side by side at their
+// desks (a room seats three, 22 units apart, and a tag is up to 55 wide) would
+// otherwise read "FINA|BOOKKEEPER". Each tag stays over its person unless it
+// would cover one already placed, and then it lifts just clear of it. The
+// lowest are placed first, so a tag only ever moves UP, away from the people
+// and desks below it; `fixed` tags (the owner's) are placed before everyone
+// and never move, and a tag with a lower `rank` is placed before one with a
+// higher (tagLifts ranks people at their desks first, so it is whoever is
+// passing by who steps aside, not the name on a desk). Tags are
+// { id, x, bottom, w, h, rank? } in map units, x the centre; returns how far
+// each one lifts.
+export const TAG_GAP = 0.6;
+export function stackTags(tags, fixed = []) {
+  const placed = fixed.map((t) => ({ x: t.x - t.w / 2, y: t.bottom - t.h, w: t.w, h: t.h }));
+  const lift = {};
+  const order = [...tags].sort((a, b) => (a.rank || 0) - (b.rank || 0) || b.bottom - a.bottom || a.x - b.x
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const t of order) {
+    let bottom = t.bottom;
+    for (let guard = 0; guard <= placed.length; guard++) {
+      const box = { x: t.x - t.w / 2, y: bottom - t.h, w: t.w, h: t.h };
+      const hit = placed.find((p) => boxesMeet(box, p));
+      if (!hit) break;
+      bottom = hit.y - TAG_GAP;
+    }
+    placed.push({ x: t.x - t.w / 2, y: bottom - t.h, w: t.w, h: t.h });
+    lift[t.id] = t.bottom - bottom;
+  }
+  return lift;
+}
+
+// The lift each person's name tag needs this frame (stackTags), worked out
+// from the frame's scene: everyone drawn, with the owner's tag fixed.
+// `tagSize(id)` gives a tag's measured [w, h], or null when it isn't known yet.
+export function tagLifts(items, tagSize) {
+  const tags = [], fixed = [];
+  for (const it of items) {
+    if (it.type !== "person") continue;
+    const sz = tagSize(it.id);
+    if (!sz) continue;
+    const t = { id: it.id, x: it.x, bottom: it.y - PERSON_H - 1, w: sz[0], h: sz[1], rank: it.seated ? 0 : 1 };
+    (it.sprite === "owner" ? fixed : tags).push(t);
+  }
+  return stackTags(tags, fixed);
+}
+
 export function tagsUnderLabels(people, tagSize, labels) {
   const out = new Set();
   for (const p of people) {

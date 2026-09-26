@@ -38,6 +38,7 @@ const HQ_SEATS = {
   "billing-specialist": "finance",
   "operations-manager": "ops",
   "systems-watchdog": "ops",
+  "web-designer": "ops",
   "marketing-manager": "marketing",
   "content-creator": "marketing",
   "reviews-referrals": "marketing",

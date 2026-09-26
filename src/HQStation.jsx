@@ -33,7 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MAP_W, MAP_H, ROOM_RECTS, MAP_LABELS, SEAT_SPOTS, SEAT_FACING, PERSON_H,
   makeWalkers, makeStation, stepCrew, queueDelivery, drawStatic, drawDynamic, roomAt, sceneItems, drawScene,
-  labelSlots, placeLabel, crowdBoxes, tagsUnderLabels,
+  labelSlots, placeLabel, crowdBoxes, tagsUnderLabels, personAt, tagLifts,
 } from "./hqStation.js";
 import stationSm from "./hq-art/station-v1-1280.webp";
 import stationLg from "./hq-art/station-v1-2048.webp";
@@ -85,7 +85,7 @@ function tagSpot(x, y, seated, room) {
 
 export default function HQStation({
   seats, roomStates, board, selected, onSelect, reduceMotion,
-  deliveries = [], onDelivered = null, deskCount = 0,
+  deliveries = [], onDelivered = null, deskCount = 0, onAgent = null,
 }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -216,7 +216,14 @@ export default function HQStation({
       }
       return t;
     };
-    const placeTags = () => {
+    // Each tag over its person, lifted clear of any it would cover
+    // (hqStation.js tagLifts). Returns the lifts, so a lifted tag that ends up
+    // under a room's name steps back for that moment like any other: room
+    // names never move for tags (measured: letting them made Finance's hop
+    // ~2.7 times a minute with two people at their desks).
+    const placeTags = (items) => {
+      const sizes = sizesRef.current && sizesRef.current.tags;
+      const lift = sizes ? tagLifts(items, (id) => sizes[id] || null) : {};
       for (const w of walkersRef.current) {
         const el = tagRefs.current[w.id];
         if (!el) continue;
@@ -225,8 +232,9 @@ export default function HQStation({
         const [x, y] = w.mode === "sit" ? w.seat : [w.x, w.y];
         const [tx, ty] = painted ? tagSpot(x, y, w.mode === "sit", w.home) : [x, y - 12];
         el.style.left = `${(tx / MAP_W) * 100}%`;
-        el.style.top = `${(ty / MAP_H) * 100}%`;
+        el.style.top = `${((ty - (lift[w.id] || 0)) / MAP_H) * 100}%`;
       }
+      return lift;
     };
     // Room names keep clear of people (hqStation.js labelSlots / placeLabel):
     // each moves to a clear place on its walls before anyone reaches it,
@@ -237,7 +245,7 @@ export default function HQStation({
       el.style.left = `${(slot.x / MAP_W) * 100}%`;
       el.style.top = `${(slot.y / MAP_H) * 100}%`;
     };
-    const placeLabels = (now, items) => {
+    const placeLabels = (now, items, lift = {}) => {
       const sizes = sizesRef.current;
       if (!sizes) return;
       const moving = !reduceMotion;
@@ -268,7 +276,7 @@ export default function HQStation({
         }
         if (!s.hidden) hung.push(slots[s.shown]);
       }
-      const people = items.filter((it) => it.type === "person").map((it) => ({ id: it.id, x: it.x, feet: it.y }));
+      const people = items.filter((it) => it.type === "person").map((it) => ({ id: it.id, x: it.x, feet: it.y - (lift[it.id] || 0) }));
       const under = tagsUnderLabels(people, (pid) => sizes.tags[pid] || null, hung);
       for (const [pid, el] of Object.entries(tagRefs.current)) {
         if (el) el.style.opacity = under.has(pid) ? "0" : "";
@@ -293,8 +301,8 @@ export default function HQStation({
         const items = sceneItems(seatsRef.current, walkersRef.current);
         drawScene(ctx, items, sheets.images,
           { t: reduceMotion ? 0 : t, selected: selectedRef.current, deskCount: deskCountRef.current });
-        placeTags();
-        placeLabels(now, items);
+        const lift = placeTags(items);
+        placeLabels(now, items, lift);
       };
     } else {
       if (canvas.width !== MAP_W) canvas.width = MAP_W;
@@ -312,7 +320,7 @@ export default function HQStation({
         ctx.clearRect(0, 0, MAP_W, MAP_H);
         ctx.drawImage(layer, 0, 0);
         drawDynamic(ctx, reduceMotion ? 0 : t, { walkers: walkersRef.current, seats: seatsRef.current, selected: selectedRef.current, board });
-        placeTags();
+        placeTags(sceneItems(seatsRef.current, walkersRef.current));
       };
     }
 
@@ -331,13 +339,26 @@ export default function HQStation({
     const r = canvasRef.current.getBoundingClientRect();
     return [((e.clientX - r.left) / r.width) * MAP_W, ((e.clientY - r.top) / r.height) * MAP_H];
   };
+  // A tap on a person opens their profile; anywhere else in a room picks
+  // the room. The owner sits at his desk and never walks, so he's added here.
+  const whoAt = (px, py) => {
+    if (!onAgent) return null;
+    const [ox, oy] = SEAT_SPOTS.owner[0];
+    const ownerSeat = seatsRef.current.find((s) => s.status === "you");
+    const extra = ownerSeat ? [{ id: ownerSeat.id, x: ox, y: oy }] : [];
+    return personAt(px, py, walkersRef.current, { extra, tags: sizesRef.current && sizesRef.current.tags });
+  };
   const onClick = (e) => {
-    const id = roomAt(...pointAt(e));
+    const [px, py] = pointAt(e);
+    const who = whoAt(px, py);
+    if (who) { onAgent(who); return; }
+    const id = roomAt(px, py);
     if (id && id !== "atrium") onSelect(id);
   };
   const onMove = (e) => {
-    const id = roomAt(...pointAt(e));
-    e.currentTarget.style.cursor = id && id !== "atrium" ? "pointer" : "default";
+    const [px, py] = pointAt(e);
+    const id = roomAt(px, py);
+    e.currentTarget.style.cursor = whoAt(px, py) || (id && id !== "atrium") ? "pointer" : "default";
   };
 
   // Everyone who can walk starts at their own desk.
@@ -362,7 +383,7 @@ export default function HQStation({
           alt="" draggable={false} onError={() => setBgFailed(true)} />
       )}
       <canvas ref={canvasRef} width={MAP_W} height={MAP_H} onClick={onClick} onMouseMove={onMove}
-        role="img" aria-label="A map of the building: rooms for each department, the crew walking the halls. Choose a department from the list to see who works there." />
+        role="img" aria-label="A map of the building: rooms for each department, the crew walking the halls. Choose a department from the list, or search for an agent, to see who works there." />
       {/* On the painted map each room's name hangs on a wall and moves to a
           clear place before anyone reaches it (placeLabels, above); it starts
           at its usual place. The pixel map keeps them in the corner. */}

@@ -27,6 +27,7 @@ import { functions } from "./firebase.js";
 import {
   ROOMS, FLOORS, SEATS, CREW_RULES, BLUEPRINT, ENGINES,
   roomById, seatById, roomsOnFloor, orgCounts, roomSummary, liveSeats, headOf,
+  findAgents, agentBrief, reportsTo, chatApps,
 } from "./hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "./hqPixels.js";
 import HQStation from "./HQStation.jsx";
@@ -202,11 +203,14 @@ function StatusPill({ status }) {
   return <span className={`hq-pill hq-pill-${status}`}>{STATUS_LABEL[status] || status}</span>;
 }
 
-function SeatRow({ s, lastShift }) {
+function SeatRow({ s, lastShift, onOpen }) {
+  const n = (s.duties || []).length;
   return (
     <li className={`hq-seat hq-seat-${s.status}`}>
       <div className="hq-seat-head">
-        <span className="hq-seat-title">{s.title}</span>
+        {/* The whole card opens the profile: the title's button stretches over it. */}
+        <button type="button" className="hq-seat-title hq-seat-open" onClick={() => onOpen(s.id)}
+          aria-label={`${s.title}: see everything they're responsible for`}>{s.title}</button>
         <StatusPill status={s.status} />
       </div>
       {s.role === "head" && <span className="hq-seat-role">Department head</span>}
@@ -220,11 +224,159 @@ function SeatRow({ s, lastShift }) {
       )}
       {s.waitingOn && <p className="hq-seat-note">First shift after: {s.waitingOn}</p>}
       {s.hireWhen && <p className="hq-seat-note">When to hire: {s.hireWhen}</p>}
+      <span className="hq-seat-more" aria-hidden="true">{n > 1 ? `All ${n} jobs` : "Profile"} &rsaquo;</span>
     </li>
   );
 }
 
-function DeptPanel({ roomId, panelRef, shifts, allSeats }) {
+// Kevin: "When I click on the specific agent can we make sure that it tells me
+// all of the jobs that they are responsible for?" Everything about one seat:
+// what it's responsible for, who it answers to, where it runs, the apps to
+// leave on for it, and how to start a conversation with it.
+function AgentSheet({ seat, seats, shifts, onClose, onOpen }) {
+  const sheetRef = useRef(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    setCopied("");
+    if (sheetRef.current) { sheetRef.current.scrollTop = 0; sheetRef.current.focus({ preventScroll: true }); }
+  }, [seat.id]);
+  const room = roomById(seat.room);
+  const boss = reportsTo(seat, seats);
+  const team = seat.role === "head" && seat.room !== "chief"
+    ? seats.filter((x) => x.room === seat.room && x.role === "worker") : [];
+  const last = (shifts || []).find((sh) => sh.worker === seat.id) || null;
+  const duties = seat.duties && seat.duties.length ? seat.duties : [seat.job];
+  const engine = seat.engine && ENGINES[seat.engine];
+  const hired = seat.status !== "open" && seat.status !== "you";
+  const brief = agentBrief(seat, seats);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(brief);
+      setCopied("Copied. Paste it into a new chat.");
+    } catch {
+      setCopied("Couldn't copy here. Open \u201cShow the brief\u201d and copy it by hand.");
+    }
+  };
+  return (
+    <div className="hq-spend-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <section className="hq-spend hq-agent" role="dialog" aria-modal="true" aria-labelledby="hq-agent-title"
+        ref={sheetRef} tabIndex={-1}>
+        <div className="hq-spend-head">
+          <div>
+            <div className="hq-eyebrow">{room ? room.name : ""}{seat.role === "head" ? " · Department head" : ""}</div>
+            <h2 id="hq-agent-title" className="hq-h2">{seat.title}</h2>
+          </div>
+          <button type="button" className="hq-spend-x" onClick={onClose} aria-label="Close profile">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <div className="hq-agent-line">
+          <StatusPill status={seat.status} />
+          {boss && (boss.role === "owner"
+            ? <span>Reports to you</span>
+            : <span>Reports to <button type="button" className="hq-link" onClick={() => onOpen(boss.id)}>{boss.title}</button></span>)}
+        </div>
+
+        <h3 className="hq-agent-h">{seat.role === "owner" ? "Your part" : "Responsible for"}</h3>
+        <ul className="hq-agent-duties">
+          {duties.map((d) => <li key={d}>{d}</li>)}
+        </ul>
+
+        {team.length > 0 && (
+          <>
+            <h3 className="hq-agent-h">Their team</h3>
+            <ul className="hq-agent-team">
+              {team.map((t) => (
+                <li key={t.id}>
+                  <button type="button" className="hq-link" onClick={() => onOpen(t.id)}>{t.title}</button>
+                  <StatusPill status={t.status} />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {hired && (
+          <>
+            <h3 className="hq-agent-h">How it works</h3>
+            <dl className="hq-agent-facts">
+              {engine && <><dt>Runs on</dt><dd>{engine.label}</dd></>}
+              {seat.apps && seat.apps.length > 0 && <><dt>Apps</dt><dd>{seat.apps.join(" + ")}. Every other app off.</dd></>}
+              {last && <><dt>Last shift</dt><dd>{fmtWhen(last.startedAt)} · {SHIFT_LABEL[last.status] || last.status}</dd></>}
+              {!last && seat.waitingOn && <><dt>First shift after</dt><dd>{seat.waitingOn}</dd></>}
+            </dl>
+          </>
+        )}
+        {seat.status === "open" && (
+          <p className="hq-agent-note">
+            {seat.hireWhen ? `Not hired yet. When to hire: ${seat.hireWhen}.` : "Not hired yet: nobody does this job on a schedule. You can still talk it through with them below."}
+          </p>
+        )}
+
+        {seat.role !== "owner" && (
+          <div className="hq-agent-talk">
+            <h3 className="hq-agent-h">Talk to them</h3>
+            <p>
+              Start a new chat in your Claude app (a regular chat, not Claude Code).{" "}
+              {chatApps(seat).length ? `Switch on only ${chatApps(seat).join(" and ")}.` : "No apps needed."}{" "}
+              Paste in their brief, then ask what you need.
+            </p>
+            <div className="hq-agent-actions">
+              <button type="button" className="hq-btn hq-btn-primary" onClick={copy}>Copy their brief</button>
+              <a className="hq-btn hq-btn-ghost" href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">Open a new chat</a>
+            </div>
+            {copied && <p className="hq-agent-copied" role="status">{copied}</p>}
+            <details className="hq-agent-brief">
+              <summary>Show the brief</summary>
+              <pre>{brief}</pre>
+            </details>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// Kevin: "some type of search where I can type a name, job type, etc and it
+// should point me in the right direction on who is the agent that can assist
+// me ... it should take me to that agents profile."
+function AgentSearch({ seats, onOpen }) {
+  const [q, setQ] = useState("");
+  const results = useMemo(() => findAgents(q, seats), [q, seats]);
+  const asked = q.trim().length > 0;
+  return (
+    <section className="hq-search" role="search" aria-label="Find the right agent">
+      <label htmlFor="hq-search-input" className="hq-search-label">Who can help with&hellip;</label>
+      <input id="hq-search-input" className="hq-search-input" type="search" value={q} autoComplete="off"
+        enterKeyHint="search" onChange={(e) => setQ(e.target.value)}
+        placeholder="A name, a job or a problem: prices, website, a failed card" />
+      {asked && (results.length > 0 ? (
+        <ul className="hq-search-results" aria-live="polite">
+          {results.map(({ seat, why }) => {
+            const room = roomById(seat.room);
+            return (
+              <li key={seat.id}>
+                <button type="button" className="hq-search-hit" onClick={() => onOpen(seat.id)}>
+                  <span className="hq-search-top">
+                    <span className="hq-search-title">{seat.title}</span>
+                    <StatusPill status={seat.status} />
+                  </span>
+                  <span className="hq-search-room">{room ? room.name : ""}</span>
+                  <span className="hq-search-why">{why}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="hq-search-none" aria-live="polite">Nobody on the chart handles that yet. Ask Claude, and a seat can be added for it.</p>
+      ))}
+    </section>
+  );
+}
+
+function DeptPanel({ roomId, panelRef, shifts, allSeats, onOpen }) {
   const room = roomById(roomId);
   const seats = inRoom(allSeats, roomId);
   // Shifts arrive newest first, so the first one per worker is its latest.
@@ -235,7 +387,7 @@ function DeptPanel({ roomId, panelRef, shifts, allSeats }) {
       <h2 id="hq-dept-title" className="hq-h2">{room.name}</h2>
       <p className="hq-uses"><span className="hq-uses-label">How you&rsquo;ll use it</span>{room.uses}</p>
       <ul className="hq-seats">
-        {seats.map((s) => <SeatRow key={s.id} s={s} lastShift={lastShift(s.id)} />)}
+        {seats.map((s) => <SeatRow key={s.id} s={s} lastShift={lastShift(s.id)} onOpen={onOpen} />)}
       </ul>
     </section>
   );
@@ -317,6 +469,10 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   const [spendView, setSpendView] = useState(null);
   const spendViewRef = useRef(null);
   const spendOpener = useRef(null);
+  // One agent's profile, open over everything else (AgentSheet).
+  const [agentId, setAgentId] = useState(null);
+  const agentIdRef = useRef(null);
+  const agentOpener = useRef(null);
   const rootRef = useRef(null);
   const panelRef = useRef(null);
   const deskRef = useRef(null);
@@ -361,6 +517,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   const closeSpendRef = useRef(() => {});
+  const closeAgentRef = useRef(() => {});
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -368,6 +525,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
     // is open over it.
     const onKey = (e) => {
       if (e.key !== "Escape") return;
+      if (agentIdRef.current) { closeAgentRef.current(); return; }
       if (spendViewRef.current) { closeSpendRef.current(); return; }
       if (onCloseRef.current) onCloseRef.current();
     };
@@ -470,6 +628,22 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
     if (back && back.focus) requestAnimationFrame(() => back.focus({ preventScroll: true }));
   };
   closeSpendRef.current = closeSpend;
+  // Opening a profile from another profile (a boss, a team member) keeps the
+  // first opener, so closing returns focus to where Kevin started.
+  const openAgent = (id) => {
+    if (!agentIdRef.current) agentOpener.current = typeof document !== "undefined" ? document.activeElement : null;
+    agentIdRef.current = id;
+    setAgentId(id);
+  };
+  const closeAgent = () => {
+    agentIdRef.current = null;
+    setAgentId(null);
+    const back = agentOpener.current;
+    agentOpener.current = null;
+    if (back && back.focus && document.contains(back)) requestAnimationFrame(() => back.focus({ preventScroll: true }));
+  };
+  closeAgentRef.current = closeAgent;
+  const agentSeat = agentId ? seats.find((s) => s.id === agentId) || null : null;
 
   // Mark done, dismiss or undo. The screen changes at once; if the server
   // refuses, the item goes back where it was and the reason is shown.
@@ -542,6 +716,8 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
       <main className="hq-wrap">
         <p className="hq-hello">{firstName ? `Welcome in, ${firstName}.` : "Welcome in."}</p>
 
+        <AgentSearch seats={seats} onOpen={openAgent} />
+
         {sample && (
           <p className="hq-preview-note" role="note">
             Preview with example items. The real desk only opens for the owner&rsquo;s account.
@@ -599,7 +775,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
               {view === "station" ? (
                 <HQStation seats={seats} roomStates={roomStates} board={boardLights}
                   selected={selected} onSelect={pick} reduceMotion={reduceMotion}
-                  deliveries={toDeliver} onDelivered={markDelivered}
+                  deliveries={toDeliver} onDelivered={markDelivered} onAgent={openAgent}
                   deskCount={Math.max(0, desk.open.length - toDeliver.length)} />
               ) : (
                 <section className="hq-building" aria-label="The building, floor by floor. Tap a room to see that department.">
@@ -669,7 +845,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </div>
         </section>
 
-        <DeptPanel roomId={selected} panelRef={panelRef} shifts={desk.shifts} allSeats={seats} />
+        <DeptPanel roomId={selected} panelRef={panelRef} shifts={desk.shifts} allSeats={seats} onOpen={openAgent} />
 
         <section className="hq-card hq-desk" aria-labelledby="hq-desk-title" ref={deskRef} tabIndex={-1}>
           <div className="hq-row">
@@ -759,14 +935,14 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
                   </div>
                   <div className="hq-org-head">
                     <span className={`hq-dot hq-dot-${head.status}`} aria-hidden="true" />
-                    <span>{head.title}</span>
+                    <button type="button" className="hq-org-person" onClick={() => openAgent(head.id)}>{head.title}</button>
                     <span className="hq-org-tag">Head</span>
                   </div>
                   <ul className="hq-org-workers">
                     {workers.map((w) => (
                       <li key={w.id}>
                         <span className={`hq-dot hq-dot-${w.status}`} aria-hidden="true" />
-                        <span>{w.title}</span>
+                        <button type="button" className="hq-org-person" onClick={() => openAgent(w.id)}>{w.title}</button>
                         <span className="hq-sr">({STATUS_LABEL[w.status]})</span>
                       </li>
                     ))}
@@ -810,6 +986,9 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
       </main>
       {spendView && (
         <HQSpend load={loadSpend} saveCosts={saveCosts} initial={spend} focus={spendView} onClose={closeSpend} />
+      )}
+      {agentSeat && (
+        <AgentSheet seat={agentSeat} seats={seats} shifts={desk.shifts} onClose={closeAgent} onOpen={openAgent} />
       )}
     </div>,
     document.body,
@@ -1106,6 +1285,53 @@ const CSS = `
 .hq-seat-role { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--hq-cyan); }
 .hq-seat-job { margin: 0; font-size: 14px; color: #C9DCDC; max-width: 65ch; }
 .hq-seat-note { margin: 0; font-size: 13px; color: var(--hq-amber); }
+.hq-seat { position: relative; }
+.hq-seat:hover { border-color: rgba(8,220,224,.35); }
+.hq-seat-open { border: 0; background: none; padding: 0; margin: 0; color: inherit; text-align: left; cursor: pointer; }
+.hq-seat-open::after { content: ""; position: absolute; inset: 0; border-radius: 10px; }
+.hq-seat-open:focus { outline: none; }
+.hq-seat-open:focus-visible::after { outline: 2px solid var(--hq-cyan); outline-offset: 2px; }
+.hq-seat-more { font-size: 12.5px; color: var(--hq-cyan); justify-self: start; }
+.hq-org-person { border: 0; background: none; padding: 0; margin: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted rgba(8,220,224,.6); text-underline-offset: 3px; }
+
+/* Finding the right agent, and an agent's profile */
+.hq-search { display: grid; gap: 8px; }
+.hq-search-label { font-family: var(--hq-pixel); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--hq-cyan); }
+.hq-search-input {
+  width: 100%; min-height: 46px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--hq-line2);
+  background: #0A1114; color: var(--hq-text); font-size: 16px; box-sizing: border-box;
+}
+.hq-search-input::placeholder { color: var(--hq-muted); }
+.hq-search-input:focus { outline: 2px solid rgba(8,220,224,.55); outline-offset: 1px; }
+.hq-search-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.hq-search-hit {
+  width: 100%; display: grid; gap: 3px; text-align: left; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--hq-line); background: #0A1114; color: var(--hq-text); cursor: pointer;
+}
+.hq-search-hit:hover, .hq-search-hit:focus-visible { border-color: rgba(8,220,224,.5); outline: none; }
+.hq-search-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hq-search-title { font-family: var(--hq-display); font-weight: 600; font-size: 15px; }
+.hq-search-room { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--hq-muted); }
+.hq-search-why { font-size: 13.5px; color: #C9DCDC; }
+.hq-search-none { margin: 0; font-size: 13.5px; color: var(--hq-muted); }
+.hq-agent-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 13.5px; color: var(--hq-muted); }
+.hq-agent-h { margin: 18px 0 6px; font-family: var(--hq-pixel); font-size: 10px; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; color: var(--hq-cyan); }
+.hq-agent-duties { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14.5px; line-height: 1.4; color: var(--hq-text); }
+.hq-agent-team { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.hq-agent-team li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hq-agent-facts { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13.5px; }
+.hq-agent-facts dt { color: var(--hq-muted); }
+.hq-agent-facts dd { margin: 0; }
+.hq-agent-note { margin: 16px 0 0; font-size: 13.5px; color: var(--hq-amber); }
+.hq-agent-talk p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; color: #C9DCDC; }
+.hq-agent-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hq-agent-talk .hq-agent-copied { margin: 8px 0 0; color: #2FE0A8; }
+.hq-agent-brief { margin-top: 10px; }
+.hq-agent-brief summary { cursor: pointer; font-size: 13px; color: var(--hq-cyan); }
+.hq-agent-brief pre {
+  white-space: pre-wrap; font: 12.5px/1.45 inherit; background: #0A1114; border: 1px solid var(--hq-line);
+  border-radius: 10px; padding: 10px; margin: 8px 0 0; color: #C9DCDC; user-select: text;
+}
 .hq-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; border: 1px solid; }
 .hq-pill-you { color: var(--hq-cyan); border-color: rgba(8,220,224,.5); background: rgba(8,220,224,.08); }
 .hq-pill-working, .hq-pill-on-shift { color: #2FE0A8; border-color: rgba(47,224,168,.5); background: rgba(47,224,168,.08); }

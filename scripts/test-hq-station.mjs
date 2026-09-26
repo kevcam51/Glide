@@ -38,7 +38,7 @@ import {
   seatStand, PERSONAL_SPACE, crowded, claimedSpots, DOORWAYS, FIRST_RUN_MS, RUN_GAP_MS, HANDOFF_MS,
   HANG_BACK, behind, PERSON_W, personBox, tagBox, boxesMeet, labelSlots, placeLabel, crowdBoxes,
   tagsUnderLabels, ahead, LABEL_SETTLE_MS, LABEL_LOOKAHEAD_S,
-  DESK_TIME_MS, FIRST_STROLL_MS, STROLL_LIMIT, strolling,
+  DESK_TIME_MS, FIRST_STROLL_MS, STROLL_LIMIT, strolling, personAt, TAP_SLOP, stackTags, TAG_GAP, tagLifts,
 } from "../src/hqStation.js";
 
 let fails = 0, checks = 0;
@@ -137,16 +137,18 @@ console.log("walkers");
     }
     return { ws, log };
   };
-  const { ws, log } = simulate(20 * 60);
+  // An hour, not twenty minutes: people mostly sit at their desks now, so
+  // variety takes longer to show (see "mostly at their desks").
+  const { ws, log } = simulate(60 * 60);
   ws.forEach((w, i) => {
     const L = log[i];
     ok(L.nan === 0, `${w.id}: never at a position that isn't a number`);
     ok(L.offFloor === 0, `${w.id}: never off the floor (${L.offFloor} steps were)`);
-    ok(L.left >= 3 && L.back >= 3, `${w.id}: over 20 minutes leaves the desk and comes back, again and again (${L.left} out, ${L.back} back)`);
+    ok(L.left >= 3 && L.back >= 3, `${w.id}: over an hour leaves the desk and comes back, again and again (${L.left} out, ${L.back} back)`);
     ok(!L.rooms.has("owner"), `${w.id}: never walks into your office on a tour — that walk is kept for deliveries (${[...L.rooms].join(", ")})`);
-    ok(L.rooms.size >= 5, `${w.id}: over 20 minutes visits many parts of the building (${L.rooms.size}: ${[...L.rooms].join(", ")})`);
+    ok(L.rooms.size >= 5, `${w.id}: over an hour visits many parts of the building (${L.rooms.size}: ${[...L.rooms].join(", ")})`);
   });
-  const again = simulate(20 * 60);
+  const again = simulate(60 * 60);
   ok(again.log.every((L, i) => L.trail.join("|") === log[i].trail.join("|")), "the same seed walks the same day every time");
 
   // Kevin: routes "always different". Every opening seeds a new day.
@@ -441,6 +443,75 @@ console.log("mostly at their desks");
   idle.until = 0;
   stepCrew([idle, ...ws.slice(0, STROLL_LIMIT)], 0.05, 10, null);
   ok(idle.mode === "sit", "…while someone who only wants a stroll waits their turn at the desk");
+}
+
+// ── 3d¾. Tapping a person ──────────────────────────────────────────────────
+// Kevin: "When I click on the specific agent ..." — a tap on someone on the
+// map opens their profile; a tap anywhere else in a room still picks the room.
+console.log("tapping a person");
+{
+  const ws = makeWalkers(SEATS, 0, 2);
+  const w = ws[0];
+  const [fx, fy] = seatStand(w.home, w.seat);
+  ok(personAt(fx, fy - 7, ws) === w.id, "a tap on someone seated at their desk finds them");
+  ok(personAt(fx, fy - PERSON_H - 5, ws, { tags: { [w.id]: [30, 9] } }) === w.id && personAt(fx, fy - PERSON_H - 5, ws) !== w.id,
+    "…so does a tap on their name tag, when the page knows its size");
+  ok(personAt(160, 110, ws) === null, "a tap on empty floor finds nobody, so the room is picked instead");
+  const [a, b] = ws;
+  a.mode = "walk"; a.x = 150; a.y = 80; b.mode = "walk"; b.x = 156; b.y = 80;
+  ok(personAt(151, 74, ws) === a.id && personAt(155, 74, ws) === b.id, "two people side by side: the one under the finger wins");
+  ok(personAt(150 + 4 + TAP_SLOP - 0.5, 74, [a]) === a.id && personAt(150 + 4 + TAP_SLOP + 1, 74, [a]) === null,
+    `a fingertip's slack (${TAP_SLOP}), and no more`);
+  ok(personAt(56, 33, [], { extra: [{ id: "owner", x: 56, y: 40 }] }) === "owner", "the owner at his desk can be tapped too");
+  ok(/if \(who\) \{ onAgent\(who\); return; \}/.test(stripComments(readFileSync(new URL("../src/HQStation.jsx", import.meta.url), "utf8"))),
+    "the map asks who's there before it picks a room");
+}
+
+// ── 3d⅞. Name tags never print over each other ─────────────────────────────
+// Two neighbours at their desks read "FINA|BOOKKEEPER" before this (seen in
+// the preview the day the Finance Manager and the Web Designer were hired).
+console.log("name tags side by side");
+{
+  const boxOf = (t, lift) => ({ x: t.x - t.w / 2, y: t.bottom - (lift[t.id] || 0) - t.h, w: t.w, h: t.h });
+  const clear = (tags, lift) => tags.every((a, i) => tags.every((b, j) => i >= j || !boxesMeet(boxOf(a, lift), boxOf(b, lift))));
+  // Every room's desks, full, with the widest tags measured on a phone.
+  let ok1 = true;
+  const climb = {};
+  for (const [room, spots] of Object.entries(SEAT_SPOTS)) {
+    if (room === "owner") continue;
+    const tags = spots.map(([x, y], i) => ({ id: `${room}${i}`, x, bottom: seatStand(room, [x, y])[1] - PERSON_H - 1, w: 55, h: 9.4 }));
+    const lift = stackTags(tags);
+    if (!clear(tags, lift)) ok1 = false;
+    climb[room] = Math.round(Math.max(...Object.values(lift)) / (9.4 + TAG_GAP));
+    if (Math.min(...tags.map((t) => lift[t.id])) !== 0) ok1 = false;
+  }
+  ok(ok1, "with every desk in every room filled, no two name tags overlap, and each room's first tag stays put");
+  // A tag climbs one level per neighbour it would cover. Three at their desks
+  // is two levels, which a room carries; a fourth (the Front Office, full)
+  // stacks up into the hallway, and THAT is Kevin's signal that the room is
+  // too crowded and should be made bigger — not something to hide.
+  ok(Object.entries(climb).every(([room, n]) => n <= SEAT_SPOTS[room].length - 1)
+    && Object.entries(SEAT_SPOTS).filter(([, sp]) => sp.length <= 3).every(([room]) => room === "owner" || climb[room] <= 2),
+    `…a tag climbs one level per neighbour, so a room of three never stacks more than two high (${JSON.stringify(climb)})`);
+  const lone = [{ id: "a", x: 50, bottom: 30, w: 40, h: 9 }, { id: "b", x: 200, bottom: 30, w: 40, h: 9 }];
+  const l2 = stackTags(lone);
+  ok(l2.a === 0 && l2.b === 0, "tags that don't touch aren't moved");
+  const pair = [{ id: "b", x: 60, bottom: 30, w: 40, h: 9 }, { id: "a", x: 50, bottom: 30, w: 40, h: 9 }];
+  const l3 = stackTags(pair);
+  ok(l3.a === 0 && Math.abs(l3.b - (9 + TAG_GAP)) < 1e-9 && JSON.stringify(stackTags([...pair].reverse())) === JSON.stringify(l3),
+    "of two level neighbours, the right-hand one lifts one tag's height, whichever order they come in");
+  const l4 = stackTags([{ id: "w", x: 56, bottom: 26, w: 30, h: 9 }], [{ x: 56, bottom: 25, w: 20, h: 9 }]);
+  ok(l4.w > 0 && !boxesMeet({ x: 41, y: 26 - l4.w - 9, w: 30, h: 9 }, { x: 46, y: 16, w: 20, h: 9 }), "a tag lifts clear of the owner's, and the owner's never moves");
+  const src = stripComments(readFileSync(new URL("../src/HQStation.jsx", import.meta.url), "utf8"));
+  ok(/const lift = sizes \? tagLifts\(items, /.test(src) && /const lift = placeTags\(items\);\s*placeLabels\(now, items, lift\);/.test(src)
+    && /feet: it\.y - \(lift\[it\.id\] \|\| 0\)/.test(src) && !/liftedTags/.test(src)
+    && /placeTags\(sceneItems\(seatsRef\.current, walkersRef\.current\)\)/.test(src),
+    "the map stacks the tags every frame (on the pixel map too); a lifted tag under a room's name steps back, the name never moves for it");
+  // From a real frame: the Finance Manager and the Bookkeeper at their desks.
+  const two = SEATS.map((x) => (["finance-manager", "bookkeeper"].includes(x.id) ? { ...x, status: "training" } : x.status === "you" ? x : { ...x, status: "open" }));
+  const frame = sceneItems(two, makeWalkers(two, 0, 1));
+  const lifts = tagLifts(frame, () => [55, 9.4]);
+  ok(lifts["finance-manager"] === 0 && lifts.bookkeeper > 0, "two neighbours in Finance: one tag stays put, the other lifts clear of it");
 }
 
 // ── 3e. Hanging back ───────────────────────────────────────────────────────
@@ -776,7 +847,7 @@ console.log("room names");
     const station = makeStation(0, seed);
     const tags = Object.fromEntries(seats.map((x) => [x.id, [tagW(x.short), TAG_H]]));
     const state = Object.fromEntries(ids.map((id) => [id, {}]));
-    const out = Object.fromEntries(ids.map((id) => [id, { covered: 0, moves: 0, hidden: 0, tagged: 0, checks: 0 }]));
+    const out = Object.fromEntries(ids.map((id) => [id, { covered: 0, moves: 0, hidden: 0, tagged: 0, stepped: 0, checks: 0 }]));
     let q = 0;
     for (let step = 0; step < 24000; step++) {
       const now = step * 50;
@@ -785,6 +856,7 @@ console.log("room names");
       for (const w of crew) w.events.length = 0;
       if (step % 2) continue;
       const items = sceneItems(seats, crew);
+      const lift = tagLifts(items, (pid) => tags[pid] || null);
       const blocked = crowdBoxes(items, crew, { now });
       const people = items.filter((it) => it.type === "person");
       for (const id of ids) {
@@ -796,7 +868,11 @@ console.log("room names");
         if (i !== before) o.moves++;
         if (state[id].hidden) { o.hidden++; continue; }
         if (people.some((it) => boxesMeet(sl[i], personBox(it.x, it.y)))) o.covered++;
-        if (people.some((it) => tags[it.id] && boxesMeet(sl[i], tagBox(it.x, it.y, ...tags[it.id])))) o.tagged++;
+        // A tag at its own place under a name would be a clash; a tag that
+        // lifted clear of a neighbour and ends up under a name steps back
+        // for that moment (the page fades it), and is counted apart.
+        if (people.some((it) => tags[it.id] && !lift[it.id] && boxesMeet(sl[i], tagBox(it.x, it.y, ...tags[it.id])))) o.tagged++;
+        if (people.some((it) => tags[it.id] && lift[it.id] > 0 && boxesMeet(sl[i], tagBox(it.x, it.y - lift[it.id], ...tags[it.id])))) o.stepped++;
       }
     }
     return out;
@@ -807,12 +883,20 @@ console.log("room names");
   const crewOf = (ids) => SEATS.map((x) => (x.status === "you" ? x : { ...x, status: ids.includes(x.id) ? "training" : "open" }));
   const today = simulate(crewOf(TODAY), 11);
   const full = simulate(crewOf(SEATS.map((x) => x.id)), 11);
-  for (const [name, run] of [["today's crew", today], ["every seat filled", full]]) {
+  // And the crew as it really is now: two share Finance, two share Ops & Tech.
+  const hired = simulate(crewOf(SEATS.filter((x) => x.status === "training").map((x) => x.id)), 11);
+  for (const [name, run] of [["today's first three", today], ["today's six", hired], ["every seat filled", full]]) {
     const covered = ids.filter((id) => run[id].covered).map((id) => `${id} ${run[id].covered}`);
     ok(covered.length === 0, `${name}: no room's name ever covers a worker, or is covered by one${covered.length ? ` (${covered.join(", ")})` : ""}`);
     const moved = [...TOP, ...BOTTOM].filter((id) => run[id].moves || run[id].hidden || run[id].tagged);
-    ok(moved.length === 0, `${name}: the top and bottom rows' names never move, never hide and never meet even a name tag${moved.length ? ` (${moved.join(", ")})` : ""}`);
+    ok(moved.length === 0, `${name}: the top and bottom rows' names never move, never hide, and never sit on a name tag at its own place${moved.length ? ` (${moved.join(", ")})` : ""}`);
   }
+  ok([...TOP, ...BOTTOM].every((id) => !today[id].stepped), "with one worker to a room, no tag ever has to step back for a room's name");
+  // Measured, not hoped: in Finance, with the Finance Manager and the
+  // Bookkeeper both at their desks, one tag lifts clear of the other and sits
+  // under the room's name, so it steps back. The fix is a sign band for each
+  // room's name at the next repaint (see CLAUDE.md, round 6).
+  ok(hired.finance.stepped / hired.finance.checks < 0.75, `today's six: Finance's second name tag steps back for the room's name ${(100 * hired.finance.stepped / hired.finance.checks).toFixed(0)}% of the time`);
   const perMin = (id) => today[id].moves / 20;
   // The middle row sits between two hallways, so its names do step aside:
   // measured, about once or twice a minute with three people walking.
