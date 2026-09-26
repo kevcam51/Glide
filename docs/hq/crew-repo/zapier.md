@@ -37,38 +37,56 @@ the Automations Lead's starting file — add it to its Claude Project._
 | 18 | Untitled Zap | off (draft) | 4: Stripe New Charge → Filter → Delay → Gmail email | Unfinished receipt/thank-you idea | **Retire**; if wanted, Glidna already sees every session charge. |
 | 19 | Untitled Zap | off (draft) | 3: Acuity Appointment Start → Filter → Sheets lookup | Unfinished | **Retire.** |
 
-## SignNow — keep it (Kevin likes it)
+## The decision (Sep 26 2026 — Kevin: "I will go with whatever is best")
 
-The simplest way to keep SignNow is **four 2-step Zaps**, which fit Zapier's free plan (two steps per
-Zap, 100 tasks a month):
+**Move to Zapier's free plan before the Oct 7 renewal, and keep SignNow on it.**
+Facts behind it (checked Sep 26, zapier.com and help.zapier.com):
 
-1. Trainerize New Client → SignNow "Create Document From Template & Send Role Invite" (waiver)
-2. Trainerize New Client → SignNow "Create Document From Template & Send Role Invite" (PAR-Q)
-3. SignNow Document Completed (waiver) → Trainerize Send Message (thanks)
-4. SignNow Document Completed (PAR-Q) → Trainerize Send Message (thanks)
+- The free plan runs **unlimited two-step Zaps** (one trigger, one action), **100 tasks a month**,
+  and no premium apps, Webhooks, Filters, Paths or Formatter. Instant triggers still fire at once.
+- **SignNow and ABC Trainerize are NOT premium apps**, so both work on the free plan.
+- A downgrade takes effect at the end of the billing cycle, and **every Zap with more than one
+  action is switched off then**, so #1–#3 must be replaced first.
+- Zapier's Claude connector (MCP) works on every plan: **2 tasks per call**, about 50 calls a month
+  on the free plan. Set its server to **Managed** mode at mcp.zapier.com so each agent gets only
+  the actions picked for it (new servers start in Agentic mode, where the AI enables actions itself).
 
-About 4 tasks per new client, so ~25 new clients a month on the free plan.
-⚠️ **Check first:** this only works if neither SignNow nor ABC Trainerize is a "Premium" app on
-Zapier (premium apps need a paid plan). Neither appeared to be when checked, but confirm in the Zap
-editor — a premium app shows a badge when you pick it.
+## The four SignNow Zaps (build these first)
 
-The other way is Glidna calling SignNow's own API directly (send from a template, get told when it's
-signed, record "waiver signed" on the client). No Zapier at all — but it needs a SignNow API app, and
-it's worth checking whether Kevin's SignNow plan includes API access.
+Easiest: in Zapier, press **Create → Zap**, and type each sentence into the AI builder (Copilot),
+then check the SignNow template it picked. Skip "test step" on the SignNow action, or it sends a real
+invite — or test with your own email.
 
-## Recommendation for the plan
+1. "When a new client is added in ABC Trainerize, create a document from my waiver template in
+   SignNow and send the role invite to the client's email." (Trigger **New Client**; action
+   **Create Document From Template & Send Role Invite**.)
+2. The same, with the **PAR-Q** template.
+3. "When a document is completed in SignNow (the waiver), send the client a thank-you message in
+   ABC Trainerize." (Trigger **Document Completed**; action **Send Message in Trainerize**.)
+4. The same, for the PAR-Q.
 
-1. Build the four SignNow Zaps above and switch off #1–#3.
-2. Glidna takes over the welcome message / tag / trainer / program / email and the celebrations.
-3. **Downgrade to the free plan before the Oct 7 renewal** (Kevin does this himself, in Zapier's
-   billing page): the account stays, the SignNow Zaps keep running, and Zapier's AI connector (MCP)
-   still works for the Automations Lead to try things — each call uses 2 of the 100 tasks.
-4. Upgrade again only when a multi-step automation genuinely can't live in Glidna.
+About 4 tasks per new client, so roughly 20 new clients a month fit alongside the agents' calls.
+Then switch these four **on**, switch **#1, #2 and #3 off**, and downgrade in Zapier's billing
+settings.
+
+## The rest of the old welcome flow (optional)
+
+Each of #1's other steps can be its own two-step Zap if Kevin wants to keep it, triggered by
+**New Client** in ABC Trainerize: **Send Message in Trainerize** (the welcome message), **Add Tag to
+Client**, **Assign To** (the trainer), the add-on program action, and a Gmail welcome email. That is
+about five more tasks per new client. Otherwise Glidna takes them over later (build order in Glidna's
+docs/WORKOUT-PROGRAMMER.md), and the Google Sheets rows retire either way.
+
+## On request, not automatic
+
+When Kevin needs a document sent outside the automatic flow ("send Jane the waiver"), the
+**Client Onboarding Specialist** does it in its Claude chat through Zapier's connector, with only
+SignNow's send-invite and find actions switched on for it. It reads back the name and email, and
+sends only after Kevin says yes. That is 2 tasks per send.
 
 ## A note on Trainerize webhooks
 
-Zapier's Trainerize triggers (Workout Completed, Habit Completed, New Client, …) fire instantly —
-they could relay events to Glidna while Trainerize registers webhooks for us directly. But the relay
-step, **Webhooks by Zapier, is a paid-plan app**, so it only makes sense if Pro is kept anyway. On the
-free plan, Glidna checks Trainerize itself every few minutes until the direct webhooks are live (the
-request to api@trainerize.com was drafted in Kevin's Gmail on Sep 25, for him to send).
+Zapier's Trainerize triggers fire instantly, but relaying them to Glidna needs **Webhooks by
+Zapier**, a paid-plan app. Glidna doesn't need the relay: Trainerize will send its webhooks straight
+to https://glidna.com/hooks/trainerize once its API team turns them on (Kevin's short email, Sep 26),
+and until then Glidna checks Trainerize itself every 30 minutes.

@@ -108,6 +108,41 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238b, round 2 (Sep 26): TALK TO YOUR CREW, Trainerize webhooks have an address, and the
+> program write path is PROVEN — all LIVE** (`0892f66`, `5df4e36`; `trainerizeWebhook`, `hqApi`,
+> `hqCrewChat`, `mcp` deployed before the pushes). Kevin: "a place that i can talk to them directly,
+> or have a link that will take me directly to them in claude app", with "a front camera view of them
+> writing on the desk", and an Agents button in the Glidna AI chat. **`hqCrewChat`
+> (functions/hqChat.js, owner-only):** an agent is its own brief — `npm run gen:hq-crew` mirrors
+> hqOrg.js's `agentBrief` into `functions/hqCrew.json`, and the suite fails when it's stale — on the
+> Glidna AI's model. Tools: read the desk, file to it AS ITSELF from the cloud, and (only when its job
+> includes Glidna) the guard's read-only Glidna tools. ⚠️ **NO WRITE TOOL IS EVER OFFERED**, and one
+> the model names anyway never runs. ⚠️ **COST GOES ON THE AGENT'S TIME CARD** (`hqShifts/chat-<seat>-
+> <start>`, engine cloud, one per conversation; a quiet half hour or "New topic" starts the next), never
+> through recordUsage; a failed reply stores nothing but still bills what it spent. Presence:
+> `hqActive.until` keeps a chatting agent at its desk ten quiet minutes (hq.js overview honours it).
+> **"Open in Claude":** a saved per-agent claude.ai link (`hqSettings/crewLinks`, hq.js
+> `setCrewLink`/`crewLinks`, https + host claude.ai only) or `claude.ai/new?q=<brief>`, which fills a
+> new chat and waits for Enter (on iPhone `/new` opens the app; `/project/…` opens Safari).
+> **Screens:** `src/HQCrewChat.jsx` (portals to body, own CSS, z 2600, Escape in capture so it closes
+> before the profile), `src/hqDeskCam.js` (pure rects, 160×96: writing moves the pen, idle blinks,
+> reduced motion holds still), `src/HQCrewPicker.jsx` (Agents by department + search; lazy, rendered
+> only when AIChatPanel gets `agents={isOwnerUid}`), a `crew` glyph in icons.jsx. ⚠️ **THE BROWSER
+> PANE SOMETIMES DROPS POINTER CLICKS AND SERVES A STALE SCREENSHOT** — confirm with the DOM (a JS
+> `.click()`, `elementFromPoint`), then screenshot again. **Webhooks:** `glidna.com/hooks/trainerize`
+> → vercel.json → `trainerizeWebhook`: TR-SecretKey vs `TRAINERIZE_WEBHOOK_SECRET` (a random
+> PLACEHOLDER, version 1, until Trainerize sends the real key — Kevin sets it, destroy v1, redeploy),
+> each event stored once as `trainerizeEvents/{id}`; cold start ~1.0 s (over their 500 ms), warm
+> ~0.25 s, retries absorbed by the id. Kevin's email is now three lines: all events + the key; his
+> Gmail signature is inserted by Gmail's pen icon (an API draft never gets one). **Proven on Kevin's own
+> client profile (21029731, his OK):** trainingPlan/add → workoutDef/add (type trainingPlan) →
+> dailyWorkout/set, which needs `userID` INSIDE every item or answers 404 "User not found";
+> workoutDef/set edits a workout, dailyWorkout/set with an id moves a day, nothing edits a phase.
+> ⚠️ Test residue for Kevin to delete: phase `TEST – Glidna (delete me)` (Jan 4–10 2027). **Zapier
+> call:** free plan before Oct 7 (unlimited two-step Zaps, 100 tasks; SignNow and Trainerize are not
+> premium; multi-step Zaps switch off at the downgrade) — steps in `crew-repo/zapier.md`. Suites: HQ
+> chat 81, webhook 29; 28 + 10 deliberate breaks caught._
+>
 > _**S238b (Sep 25–26): the WORKOUT PROGRAMMER is planned, its Trainerize facts are proven, and HQ
 > hires four** (`mcp` deployed before the push, for the new seats). Read `docs/WORKOUT-PROGRAMMER.md`
 > (Kevin's spec, his approval split, the urgent medical lane, build order) and `docs/TRAINERIZE-API.md`
