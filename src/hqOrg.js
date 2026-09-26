@@ -26,7 +26,7 @@ export const ROOMS = [
   { id: "owner",     floor: 4, name: "Your Office",       tagline: "Where every decision lands",
     uses: "Everything that needs your OK ends up on your desk here. Nothing is sent, paid or published without you." },
   { id: "chief",     floor: 4, name: "Chief of Staff",    tagline: "Runs the building day to day",
-    uses: "Collects every department's work into one morning brief, so you read one page instead of six." },
+    uses: "Collects every department's work into one morning brief, so you read one page instead of six, and keeps the business's legal paperwork and renewals in order." },
   { id: "finance",   floor: 3, name: "Finance",           tagline: "Money in, money out",
     uses: "A weekly look at your books from QuickBooks: what came in, what went out, and anything that looks off." },
   { id: "ops",       floor: 3, name: "Operations & Tech", tagline: "Keeps the website, Glidna and the tools running",
@@ -73,6 +73,24 @@ export const SEATS = [
       "Keeps track of what you've decided, so the whole crew follows it.",
     ],
     keywords: ["brief", "briefing", "summary", "daily", "morning", "priorities", "overview", "today", "coordinate", "assistant", "executive", "chief", "to do", "urgent"] },
+  // Kevin, S238b, after asking who sends the waiver: "This makes me think I
+  // need an agent for legal stuff." It sits beside the Chief of Staff, whose
+  // room had the building's only empty floor. It organises and prepares; the
+  // advice itself stays with his lawyer (CREW_RULES).
+  { id: "legal-compliance", room: "chief", role: "worker", title: "Legal & Compliance Coordinator", short: "Legal", status: "training",
+    engine: "chat", waitingOn: "your first conversation with it", apps: ["Zapier (SignNow, read only)", "Glidna"],
+    job: "Keeps the business's legal paperwork in order and ready for your lawyer: waivers, policies, Glidna's terms, contracts and renewal dates.",
+    duties: [
+      "Keeps one list of every legal document you use: the waiver, the PAR-Q, your session policies, Glidna's terms and privacy policy, and trainer agreements.",
+      "Checks that every client has a signed waiver and PAR-Q on file, and tells you about anyone who doesn't.",
+      "Keeps the renewal dates: liability insurance, business licences, your certifications (CPR and AED included) and the domain.",
+      "Checks new features and automations against those documents, for example that a client agreed before a card is charged.",
+      "Drafts updates and a list of questions for your lawyer. It never gives legal advice and never signs anything.",
+    ],
+    keywords: ["legal", "lawyer", "attorney", "law", "laws", "contract", "contracts", "agreement", "agreements", "terms",
+      "terms of service", "privacy", "privacy policy", "compliance", "liability", "insurance", "license", "licence",
+      "licenses", "certification", "certifications", "cpr", "trademark", "consent", "lawsuit", "dispute", "paperwork",
+      "documents", "renewal"] },
 
   // ── Finance ───────────────────────────────────────────────────────────────
   { id: "finance-manager", room: "finance", role: "head", title: "Finance Manager", short: "Finance", status: "training",
@@ -144,6 +162,21 @@ export const SEATS = [
     keywords: ["website", "web", "site", "squarespace", "webflow", "design", "designer", "homepage", "home page", "landing page",
       "page", "pages", "domain", "seo", "google search", "app", "screens", "layout", "platform", "redesign", "logo", "photos",
       "booking page", "wix"] },
+  // Kevin, S238b: an agent to "manage zapier for me" and weigh Zapier against
+  // building the same thing in Glidna. A lead, not a head: Ops has its head.
+  { id: "automations-lead", room: "ops", role: "worker", title: "Automations Lead", short: "Automation", status: "training",
+    engine: "chat", waitingOn: "your first conversation with it (Zapier connected)", apps: ["Zapier", "Glidna"],
+    job: "Knows every automation the business runs and where it runs, builds new ones with your OK, and retires the ones you don't need.",
+    duties: [
+      "Keeps the list of every automation: what starts it, what it does, who it touches and when it last ran.",
+      "Goes through each one with you: keep it, move it into Glidna, or switch it off.",
+      "Looks after the Zaps that send your waiver and PAR-Q to every new client, and checks they still run.",
+      "Writes the plan for any automation Glidna should take over, so it can be built.",
+      "Builds a Zap only after you approve it. You switch it on.",
+      "Watches Zapier's monthly task count and tells you when a plan change is worth it.",
+    ],
+    keywords: ["automation", "automations", "automate", "automatic", "automatically", "zapier", "zap", "zaps", "workflow",
+      "workflows", "integration", "integrations", "connect apps", "trigger", "triggers", "webhook", "webhooks", "tasks"] },
 
   // ── Marketing ─────────────────────────────────────────────────────────────
   { id: "marketing-manager", room: "marketing", role: "head", title: "Marketing Manager", short: "Manager", status: "open",
@@ -233,15 +266,25 @@ export const SEATS = [
     ],
     keywords: ["schedule", "scheduling", "calendar", "appointments", "appointment", "sessions", "session", "booking", "bookings",
       "reschedule", "cancel", "cancellation", "no-show", "no show", "acuity", "availability", "reminders"] },
-  { id: "onboarding", room: "front", role: "worker", title: "Client Onboarding Specialist", short: "Onboarding", status: "open",
+  // Hired S238b for Kevin's "sending the waiver and other legal documents when
+  // I need them sent to a new client". The automatic send is a Zap the
+  // Automations Lead looks after; this seat sends on request and chases.
+  // `sendsOnRequest` is the one send the crew rules allow, and only when Kevin
+  // asks for it by name in the conversation (agentBrief spells out how).
+  { id: "onboarding", room: "front", role: "worker", title: "Client Onboarding Specialist", short: "Onboarding", status: "training",
+    engine: "chat", waitingOn: "your first conversation with it (Zapier connected, with SignNow's send action switched on)",
+    apps: ["Zapier (SignNow only)", "Glidna"],
+    sendsOnRequest: "the waiver, the PAR-Q or another document from your SignNow templates",
     job: "Gets new clients ready: welcome message, intake questions, waiver and first-session details.",
     duties: [
       "Gets new clients ready: a welcome message, intake questions, the waiver and first-session details.",
+      "Sends the waiver, the PAR-Q or another SignNow document when you ask for it by name, after reading you back the client's name and email.",
+      "Keeps track of which new clients still owe a signature, and drafts a friendly reminder for you to send.",
       "Makes sure every new client has a card on file and a plan in Glidna.",
       "Checks in after their first week.",
     ],
-    keywords: ["onboarding", "new client", "new clients", "welcome", "intake", "waiver", "sign up", "signup", "first session",
-      "getting started", "forms", "start"] },
+    keywords: ["onboarding", "new client", "new clients", "welcome", "intake", "waiver", "waivers", "par-q", "parq", "signnow",
+      "sign", "signature", "sign up", "signup", "first session", "getting started", "forms", "start"] },
 
   // ── Coaching ──────────────────────────────────────────────────────────────
   { id: "client-success-manager", room: "coaching", role: "head", title: "Client Success Manager", short: "Manager", status: "open",
@@ -272,6 +315,21 @@ export const SEATS = [
     ],
     keywords: ["check-in", "check in", "checkins", "follow up", "follow-up", "message clients", "texts", "motivation",
       "accountability", "birthday", "milestones"] },
+  // Kevin, S238b: "Head of Programs", then "if we put him in the coaching room,
+  // he can be a lead instead of a head because we already have a head". The
+  // Workout Programmer's plan is docs/WORKOUT-PROGRAMMER.md.
+  { id: "programs-lead", room: "coaching", role: "worker", title: "Programs Lead", short: "Programs", status: "training",
+    engine: "chat", waitingOn: "your first conversation with it", apps: ["Glidna"],
+    job: "Works out with you how client programs should be built, turns each decision into a rule, and checks every program the Workout Programmer drafts before it reaches your desk.",
+    duties: [
+      "Brainstorms with you how the Workout Programmer should build and adapt client programs.",
+      "Keeps the programming playbook: small swaps versus big changes, prime-time one-station plans, progress by effort, lighter weeks.",
+      "Plans around each client's equipment, space, time, schedule, favourite and least favourite exercises, and injuries.",
+      "Checks every new program the Workout Programmer drafts before it reaches you.",
+      "Sends anything about pain, injury or a medical question straight to you, as urgent.",
+    ],
+    keywords: ["program", "programs", "programming", "workout", "workouts", "training plan", "phase", "phases", "exercise",
+      "exercises", "swap", "equipment", "gym", "split", "sets", "reps", "rpe", "progression", "trainerize", "one-station"] },
 ];
 
 // The rules every worker follows, whatever department it sits in. The HQ screen
@@ -328,6 +386,10 @@ export const BLUEPRINT = [
     use: "Every evening it reads your Claude plan's usage meter and checks every crew run went through. When it's time to upgrade, a note lands on your desk." },
   { id: "profiles", title: "Every agent's profile, and a search to find the right one", status: "built",
     use: "Tap anyone to see everything they're responsible for, or type a name, a job or a problem to find who handles it." },
+  { id: "talk", title: "Talk to your crew", status: "planned",
+    use: "Tap anyone on the map or in a list, or pick them from Agents in the Glidna AI chat, and talk to them right here, at their desk. Or open their chat in your Claude app." },
+  { id: "programs", title: "The Workout Programmer", status: "planned",
+    use: "Clients message it in Trainerize; it builds and adapts their programs there. The Programs Lead checks every new program before it reaches you, and anything about pain or injury comes straight to you." },
   { id: "finance", title: "The first shifts: Bookkeeper, Front Desk and Progress Analyst", status: "next",
     use: "Each gets its own routine on your Claude plan, with only its own apps. The Bookkeeper reads QuickBooks every Monday and puts a money report on your desk." },
   { id: "front", title: "Front Office: the Front Desk, on your Claude plan", status: "planned",
@@ -438,7 +500,7 @@ export function findAgents(query, seats = SEATS, { limit = 5 } = {}) {
 // The apps from a seat's list that are connectors, the switches in a chat's
 // tools menu, without their notes: "Gmail (drafts only)" → "Gmail". The
 // Watchdog's usage meter is the Claude app itself, not a switch.
-const CONNECTORS = /^(Gmail|Google Calendar|Intuit QuickBooks|Glidna)\b/;
+const CONNECTORS = /^(Gmail|Google Calendar|Intuit QuickBooks|Glidna|Zapier)\b/;
 export function chatApps(seat) {
   return (seat && seat.apps ? seat.apps : []).filter((a) => CONNECTORS.test(a)).map((a) => a.replace(/ \(.*\)$/, ""));
 }
@@ -457,7 +519,9 @@ export function agentBrief(seat, seats = SEATS) {
     ...(seat.duties && seat.duties.length ? seat.duties : [seat.job]).map((d) => `- ${d}`),
     "",
     "How you work:",
-    "- You draft; you never send, pay, publish, delete or change anything yourself. I do that.",
+    seat.sendsOnRequest
+      ? `- You draft; you never pay, publish, delete or change anything yourself. The one thing you may send is ${seat.sendsOnRequest}, and only when I ask for it by name in this chat: read me the client's name and email first, and send it only after I say yes.`
+      : "- You draft; you never send, pay, publish, delete or change anything yourself. I do that.",
     "- Only real numbers: quote what you actually read, and tell me when you're estimating.",
     "- No tax, legal, investment or medical advice. Those questions go to my accountant, lawyer or doctor.",
     "- Never suggest anyone eat below 1,200 calories a day.",

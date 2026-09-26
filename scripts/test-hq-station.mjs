@@ -625,7 +625,9 @@ console.log("painted station");
   }
   ok(props.find((p) => p.room === "owner").kind === "exec_front", "the owner's desk faces the door, so the owner is seen from the front");
   const onlyReal = sceneItems(SEATS, []).filter((i) => i.type === "prop");
-  ok(onlyReal.filter((p) => p.room === "chief")[0].kind === "desk_off", "an open seat facing north gets a desk with its screens off");
+  // The Chief of Staff's room holds two desks since S238b, so find each by seat.
+  ok(onlyReal.find((p) => p.seatId === "chief-of-staff").kind === "desk_off", "an open seat facing north gets a desk with its screens off");
+  ok(onlyReal.find((p) => p.seatId === "legal-compliance").kind === "desk", "…and a hired one beside it has its screens on");
   ok(Object.values(SPRITES.props).every(([x, y, w, h]) => [x, y, w, h].every(Number.isFinite) && w > 0 && h > 0),
     "every prop has a place on the sprite sheet");
 

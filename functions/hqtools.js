@@ -33,12 +33,14 @@ const { postDeskItem, logShift, HQ_LIMITS } = require("./hq");
 const HQ_SEATS = {
   owner: "owner",
   "chief-of-staff": "chief",
+  "legal-compliance": "chief",
   "finance-manager": "finance",
   bookkeeper: "finance",
   "billing-specialist": "finance",
   "operations-manager": "ops",
   "systems-watchdog": "ops",
   "web-designer": "ops",
+  "automations-lead": "ops",
   "marketing-manager": "marketing",
   "content-creator": "marketing",
   "reviews-referrals": "marketing",
@@ -52,6 +54,7 @@ const HQ_SEATS = {
   "client-success-manager": "coaching",
   "progress-analyst": "coaching",
   "check-in-coordinator": "coaching",
+  "programs-lead": "coaching",
 };
 // The owner files nothing through the door; the crew does.
 const CREW_SEATS = Object.keys(HQ_SEATS).filter((id) => id !== "owner");

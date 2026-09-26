@@ -82,10 +82,17 @@ export const MAP_LABELS = {
 // figure seen from behind at a black chair simply disappeared.
 export const SEAT_SPOTS = {
   owner: [[56, 40]],
-  chief: [[164, 38]],
+  // S238b: the Legal & Compliance Coordinator joins the Chief of Staff, whose
+  // room is the one with open floor; Coaching and Ops take a fourth desk each
+  // (the Programs Lead, the Automations Lead). A desk is 17 wide, so four fit
+  // a middle-row room only shoulder to shoulder: Coaching's start just clear of
+  // the painted squat rack, Ops' end just clear of the server racks. Four
+  // desks stack their name tags into the hallway, which is the sign (round 6)
+  // that these rooms want the bigger repaint.
+  chief: [[150, 38], [178, 38]],
   finance: [[246, 38], [268, 38], [290, 38]],
-  coaching: [[54, 126], [72, 126], [90, 126]],
-  ops: [[246, 126], [268, 126], [290, 126]],
+  coaching: [[41, 126], [58, 126], [75, 126], [92, 126]],
+  ops: [[236, 126], [253, 126], [270, 126], [287, 126]],
   marketing: [[32, 190], [52, 190], [72, 190]],
   research: [[144, 190], [164, 190], [184, 190]],
   front: [[240, 188], [258, 188], [276, 188], [294, 188]],

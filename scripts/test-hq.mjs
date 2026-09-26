@@ -153,8 +153,10 @@ console.log("org chart");
   ok(first.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst",
     "the first hires are the Bookkeeper, the Front Desk Coordinator and the Progress Analyst");
   ok(first.every((s) => s.waitingOn && s.engine === "claude"), "each first hire says what it's waiting on and runs on the Claude plan");
-  ok(training.map((s) => s.id).sort().join() === "bookkeeper,finance-manager,front-desk,progress-analyst,systems-watchdog,web-designer",
-    "…joined by the Systems Watchdog, the Finance Manager and the Web Designer");
+  ok(training.map((s) => s.id).sort().join() === "automations-lead,bookkeeper,finance-manager,front-desk,legal-compliance,onboarding,"
+    + "programs-lead,progress-analyst,systems-watchdog,web-designer",
+    "…joined by the Systems Watchdog, the Finance Manager, the Web Designer and S238b's four: the Automations Lead, the "
+    + "Programs Lead, the Onboarding Specialist and the Legal & Compliance Coordinator");
   const dog = training.find((s) => s.id === "systems-watchdog");
   ok(dog && dog.engine === "mac" && ENGINES.mac && dog.waitingOn, "…from the Claude app on the owner's Mac, the one place the usage meter can be read");
   ok(first.every((s) => s.role === "worker"), "first hires are workers, not heads");
@@ -219,8 +221,8 @@ console.log("live seats");
   ok(liveSeats(SEATS, { active: [{ worker: "owner" }] }).find((s) => s.id === "owner").status === "you",
     "…and not even a clock-in can move the owner");
   const counts = orgCounts(moved);
-  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 3, `the counts follow (${JSON.stringify(counts)})`);
-  ok(roomSummary("front", moved) === "1 on shift · 3 open", `a room's line says who is on shift (${roomSummary("front", moved)})`);
+  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 7, `the counts follow (${JSON.stringify(counts)})`);
+  ok(roomSummary("front", moved) === "1 on shift · 1 in training · 2 open", `a room's line says who is on shift (${roomSummary("front", moved)})`);
   ok(roomSummary("finance", moved) === "1 working · 1 in training · 1 open", `…and who is working (${roomSummary("finance", moved)})`);
   ok(roomSummary("finance") === "2 in training · 1 open", "the chart's own line is unchanged without live data");
 
@@ -291,6 +293,12 @@ console.log("profiles and the search");
     ["who is slipping", "progress-analyst"], ["check-in message", "check-in-coordinator"],
     ["claude usage", "systems-watchdog"], ["upgrade my plan", "systems-watchdog"], ["glidna is down", "systems-watchdog"],
     ["morning brief", "chief-of-staff"], ["kevin", "owner"],
+    // S238b's hires.
+    ["legal", "legal-compliance"], ["lawyer", "legal-compliance"], ["liability insurance", "legal-compliance"],
+    ["privacy policy", "legal-compliance"], ["contract", "legal-compliance"],
+    ["zapier", "automations-lead"], ["automations", "automations-lead"], ["webhooks", "automations-lead"],
+    ["workout program", "programs-lead"], ["exercise swap", "programs-lead"], ["trainerize program", "programs-lead"],
+    ["send the waiver", "onboarding"], ["signnow", "onboarding"], ["par-q", "onboarding"],
   ];
   const wrong = cases.filter(([q, id]) => { const r = findAgents(q); return !r.length || r[0].seat.id !== id; })
     .map(([q, id]) => `"${q}" → ${(findAgents(q)[0] || { seat: { id: "nobody" } }).seat.id}, not ${id}`);
@@ -325,6 +333,20 @@ console.log("profiles and the search");
   ok(/the way the Operations Manager would/.test(agentBrief(by("web-designer"))) && !/the way the/.test(agentBrief(by("chief-of-staff"))),
     "a worker checks its work the way its head would; the Chief of Staff answers to you alone");
   ok(agentBrief(by("owner")) === "", "the owner has no brief: that's Kevin");
+  // S238b: the ONE send the rules allow — the Onboarding Specialist's SignNow
+  // documents, and only when Kevin asks for one by name in the conversation.
+  const onb = agentBrief(by("onboarding"));
+  ok(/The one thing you may send is the waiver, the PAR-Q/.test(onb) && /read me the client's name and email first/.test(onb)
+    && /only after I say yes/.test(onb) && !/never send,/.test(onb),
+    "the Onboarding Specialist may send a SignNow document, only when asked by name and after reading back who it's for");
+  ok(SEATS.filter((x) => x.sendsOnRequest).map((x) => x.id).join() === "onboarding"
+    && SEATS.filter((x) => x.role !== "owner" && x.id !== "onboarding").every((x) => /never send, pay, publish, delete or change/.test(agentBrief(x))),
+    "…it is the only seat allowed any send, and every other brief still says it never sends");
+  ok(JSON.stringify(chatApps(by("onboarding"))) === '["Zapier","Glidna"]' && JSON.stringify(chatApps(by("automations-lead"))) === '["Zapier","Glidna"]',
+    "Zapier counts as a real connector to switch on");
+  ok(by("legal-compliance").room === "chief" && reportsTo(by("legal-compliance")).id === "chief-of-staff"
+    && /never gives legal advice/.test(by("legal-compliance").duties.join(" ")),
+    "the Legal & Compliance Coordinator sits with the Chief of Staff, and prepares for the lawyer rather than advising");
   ok(JSON.stringify(chatApps(by("front-desk"))) === '["Gmail","Glidna"]' && JSON.stringify(chatApps(by("systems-watchdog"))) === '["Glidna"]'
     && !/Your Claude app/.test(agentBrief(by("systems-watchdog"))),
     "in a chat, only real connectors are named as switches: the Watchdog's usage meter isn't one");

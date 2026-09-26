@@ -4,12 +4,15 @@ This private repository is where Kevin's AI crew works from. Each worker is a
 Claude routine (claude.ai/code → Routines) that runs in Anthropic's cloud on a
 schedule, with Kevin's Mac closed. Every routine starts here, so every worker
 reads the same handbook and is stopped by the same guard.
+Some workers are conversations instead of routines: Kevin talks to them from
+their HQ profile, in the HQ itself or in a chat in his Claude app.
 
 | File | What it is |
 | --- | --- |
 | `CLAUDE.md` | The crew handbook: every shift's steps and the rules. Every routine reads it first. |
 | `facts.md` | What the business offers, in Kevin's words. Workers quote only this. |
 | `crew/<job>.md` | One job description per worker. |
+| `zapier.md` | Every Zap Kevin had on Sep 25 2026 and what to do with each: the Automations Lead's starting file. |
 | `.claude/hooks/crew-guard.sh` | The guard: refuses any tool that could send, pay, publish, delete or change something. |
 | `.claude/settings.json` | Tells Claude to run the guard before every tool. |
 
@@ -27,6 +30,10 @@ worker would read (and spend Kevin's plan on) every shift. This one is a page.
 | Systems Watchdog | Operations & Tech | Glidna, and the Claude app's usage meter | Every evening, 9:00 p.m. | scheduled task on Kevin's Mac |
 | Finance Manager | Finance (head) | Intuit QuickBooks, Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
 | Web Designer | Operations & Tech | Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
+| Automations Lead | Operations & Tech | Zapier, Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
+| Programs Lead | Coaching | Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
+| Client Onboarding Specialist | Front Office | Zapier (SignNow only), Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
+| Legal & Compliance Coordinator | Chief of Staff's office | Zapier (SignNow, read only), Glidna | When Kevin needs it | a chat Kevin starts, from its HQ profile |
 
 **Kevin's plan is Claude Pro**, which caps how many routines can start in a
 day (claude.ai/code/routines shows the number) and shares its usage with his

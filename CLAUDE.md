@@ -108,20 +108,31 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _**S238b (Sep 25): the WORKOUT PROGRAMMER is planned, and the facts under it are proven —
-> nothing built, nothing deployed.** Read `docs/WORKOUT-PROGRAMMER.md` (Kevin's spec, his approval
-> split, the urgent medical lane, build order) and `docs/TRAINERIZE-API.md` §S238b before touching
-> it. Clients will message an AI in Trainerize that builds and adapts their programs (equipment from
-> gym photos, prime-time "one-station" plans, a swap for every exercise), delivered INTO Trainerize —
-> ⚠️ **Kevin: no workout videos in Glidna; it complements Trainerize, never competes.** Verified
-> read-only: message photos ARE readable (`message/getMessages` is undocumented; `file/getFile` is
-> **GET**); webhooks EXIST (the S86d "no webhooks" line was wrong) but are registered through
-> help@trainerize.com; a new phase is trainingPlan/add → workoutDef/add → dailyWorkout/set, the first
-> and last UNPROVEN — test on a TEST client only. HQ gains a **Head of Programs**
-> (`docs/hq/crew/head-of-programs.md`); its map square is Kevin's call, and a new seat must also go in
-> `functions/hqtools.js` `HQ_SEATS` and be deployed. The Trainerize Workout Builder stays PARKED on
+> _**S238b (Sep 25–26): the WORKOUT PROGRAMMER is planned, its Trainerize facts are proven, and HQ
+> hires four** (`mcp` deployed before the push, for the new seats). Read `docs/WORKOUT-PROGRAMMER.md`
+> (Kevin's spec, his approval split, the urgent medical lane, build order) and `docs/TRAINERIZE-API.md`
+> §S238b before touching it. Clients will message an AI in Trainerize that builds and adapts their
+> programs (equipment from gym photos, prime-time "one-station" plans, a swap for every exercise),
+> delivered INTO Trainerize — ⚠️ **Kevin: no workout videos in Glidna; it complements Trainerize,
+> never competes.** Verified read-only: message photos ARE readable (`message/getMessages` is
+> undocumented; `file/getFile` is **GET**); webhooks EXIST (the S86d "no webhooks" line was wrong) but
+> are registered through Trainerize by email; a new phase is trainingPlan/add → workoutDef/add →
+> dailyWorkout/set. **Hired (all `engine: "chat"`, job files in `docs/hq/crew-repo/crew/`):** the
+> **Programs Lead** (Coaching — a LEAD, Kevin: Coaching already has a head), the **Automations Lead**
+> (Ops; its starting file is `crew-repo/zapier.md`, all 19 of Kevin's Zaps), the **Client Onboarding
+> Specialist** (Front Office, for "sending the waiver and other legal documents") and a new **Legal &
+> Compliance Coordinator** beside the Chief of Staff (the only room with open floor; it prepares
+> questions for his lawyer and never advises). ⚠️ **ONE SEND IS NOW ALLOWED, AND ONLY ONE:**
+> `sendsOnRequest` on the Onboarding seat — a SignNow document Kevin names in the conversation, read
+> back (name + email) and sent only after his yes; `agentBrief` spells it out and every other brief
+> still says it never sends (pinned). Zapier joins `CONNECTORS`. Coaching and Ops now hold four desks
+> shoulder to shoulder (17 wide, clear of the painted squat rack and server racks); their stacked name
+> tags are round 6's signal for the bigger repaint. ⚠️ A seat lives in THREE places — `src/hqOrg.js`,
+> the map's `SEAT_SPOTS`/`SEAT_X`, and `functions/hqtools.js` `HQ_SEATS` (deploy `mcp` before the push,
+> or the worker can't file to the desk) — plus, when hired, `crew-repo/crew/<id>.md` and a README row;
+> the suites fail on any one missing. The Trainerize Workout Builder stays PARKED on
 > `claude/trainerize-login-access-87dab5` (`0934b1b`). Kevin's Zapier: $29.99/mo, 0 tasks used, no Zap
-> run in 60 days — its jobs move into Glidna._
+> run in 60 days._
 >
 > _**S238, round 6 (Sep 26): every agent has a profile, a search finds the
 > right one, and Finance gets its head** (`65071b2`; `mcp` deployed before the

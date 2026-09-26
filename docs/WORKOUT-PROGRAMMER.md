@@ -17,7 +17,8 @@ _Planned S238b (Sep 25). Nothing is built yet. API facts it rests on: `docs/TRAI
   watch demos in Trainerize's own app. (This is also what makes the licensing problem go away.)
 - **An add-on, for clients AND trainers.**
 - **Users can talk to it through the Glidna connector too.**
-- **HQ gets a Head of Programs**, Kevin's brainstorming partner for the program piece.
+- **HQ gets a Programs Lead** in the Coaching department (a lead, since Coaching already has a
+  head), Kevin's brainstorming partner for the program piece: `docs/hq/crew-repo/crew/programs-lead.md`.
 - **Zapier:** move what's worth keeping into Glidna (see the last section).
 
 ## What exists and what's new
@@ -45,7 +46,7 @@ Stored per client, server-side (never in a public bundle), readable by the clien
   diagnose or treat.
 - **Goals:** from the Glidna plan (fat loss, muscle, performance), with the calorie target beside it.
 
-## Adaptation rules — the starting set (for Kevin and the Head of Programs to refine)
+## Adaptation rules — the starting set (for Kevin and the Programs Lead to refine)
 
 - **Prime time → a one-station plan.** Pick one spot and one or two pieces of kit (a pair of
   dumbbells and a bench), build supersets around them, no hopping between machines. Off-peak gets the
@@ -129,7 +130,7 @@ in the tools.
 2. The exercise catalog: bring the server half of the parked library sync to main, media-free.
 3. The program model and tools: build / revise / swap / progress, plus get/set the training profile.
 4. The message loop (polling first, webhook later), the urgent lane and HQ desk approvals.
-5. Tune the rules with Kevin and the Head of Programs, on real requests.
+5. Tune the rules with Kevin and the Programs Lead, on real requests.
 6. The add-on gate and pricing.
 7. Retire the Zapier "Celebrations": workout / cardio / goal events → celebration drafts in Glidna.
 

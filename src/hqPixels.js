@@ -339,22 +339,18 @@ function dumbbellRack(x) {
   return out;
 }
 
-function bench(x) {
-  return [R(x, FLOOR_Y - 7, 14, 2, "#1F2A2E"), R(x, FLOOR_Y - 8, 14, 1, P.cyanDeep), R(x + 2, FLOOR_Y - 5, 1, 5, P.metalDark), R(x + 11, FLOOR_Y - 5, 1, 5, P.metalDark)];
-}
-
 // ── Rooms ───────────────────────────────────────────────────────────────────
 
 // Where each room's seats sit, left to right, in the order SEATS lists them.
 const SEAT_X = {
   owner: [62],
-  chief: [82],
+  chief: [60, 84],
   finance: [32, 59, 86],
-  ops: [34, 61, 88],
+  ops: [30, 52, 74, 96],
   marketing: [25, 55, 85],
   research: [53, 74, 94],
   front: [44, 65, 86, 107],
-  coaching: [71, 90, 109],
+  coaching: [56, 75, 93, 111],
 };
 
 export function seatCenters(roomId, count) {
@@ -392,7 +388,8 @@ export function roomScene(roomId, seats, { lit = true, boardLights = [] } = {}) 
       out.push(...glassDoor(3), ...waitingChair(21));
       break;
     case "coaching":
-      out.push(...squatRack(5), ...dumbbellRack(26), ...bench(45));
+      // The bench made way for the Programs Lead's desk (S238b).
+      out.push(...squatRack(5), ...dumbbellRack(26));
       break;
     default:
       break;
